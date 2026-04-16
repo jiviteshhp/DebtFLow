@@ -4,8 +4,17 @@ from agent import get_agent_response
 import time
 from logger import log_turn
 import json
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 sessions = {}  # call_id -> DebtFlowSM instance
 
 from evals import score_conversation
@@ -55,3 +64,9 @@ def run_evals():
         results.append(scores)
     
     return {"evals": results}
+
+@app.get("/changelog")
+def get_changelog():
+    with open("changelog.jsonl", "r") as f:
+        entries = [json.loads(line) for line in f.readlines()]
+    return {"changelog": entries}
