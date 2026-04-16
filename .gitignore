@@ -3,3 +3,5 @@ venv/
 *.jsonl
 .env
 __pycache__/
+node_modules/
+dashboard/node_modules/
