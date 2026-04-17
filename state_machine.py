@@ -17,14 +17,22 @@ class DebtFlowSM:
             self.current_state = State.ASSESS
 
         elif self.current_state == State.ASSESS:
-            if borrower_input == "cant_pay":
+            intent = classify_intent(borrower_input)
+            intent = intent.strip().lower()
+            if "cant" in intent:
                 self.current_state = State.CANT_PAY
-            elif borrower_input == "wont_pay":
+            elif "wont" in intent or "won" in intent:
                 self.current_state = State.WONT_PAY
-            elif borrower_input == "will_pay":
+            elif "will" in intent:
                 self.current_state = State.WILL_PAY
-        elif (self.current_state == State.CANT_PAY or self.current_state == State.WONT_PAY or self.current_state == State.WILL_PAY):
+
+        elif self.current_state in [State.CANT_PAY, State.WONT_PAY, State.WILL_PAY]:
             self.current_state = State.END
+
+        elif self.current_state == State.END:
+            pass  # conversation over, do nothing
+
+        
     
 if __name__ == "__main__":
     sm = DebtFlowSM()
@@ -55,4 +63,22 @@ def get_response(self):
 
 
 
-        
+def classify_intent(borrower_input: str) -> str:
+    from groq import Groq
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+    
+    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+    response = client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[{
+            "role": "user",
+            "content": f"""Classify this borrower statement into exactly one of: cant_pay, wont_pay, will_pay, unclear
+
+Borrower said: "{borrower_input}"
+
+Reply with only one word: cant_pay, wont_pay, will_pay, or unclear"""
+        }]
+    )
+    return response.choices[0].message.content.strip().lower()        

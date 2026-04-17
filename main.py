@@ -46,23 +46,32 @@ def transition(call_id: str, borrower_input: str):
         "latency_ms": round(latency_ms, 2)
     }
 
+
 @app.get("/evals")
 def run_evals():
-    with open("conversations.jsonl", "r") as f:
-        turns = [json.loads(line) for line in f.readlines()]
-    
+    try:
+        with open("conversations.jsonl", "r") as f:
+            turns = [json.loads(line) for line in f.readlines() if line.strip()]
+    except FileNotFoundError:
+        return {"evals": []}
+
     results = []
     for turn in turns:
-        scores = score_conversation(
-            turn["state"],
-            turn["borrower_input"],
-            turn["agent_response"]
-        )
-        scores["call_id"] = turn["call_id"]
-        scores["state"] = turn["state"]
-        scores["latency_ms"] = turn["latency_ms"]
-        results.append(scores)
-    
+        try:
+            scores = score_conversation(
+                turn["state"],
+                turn["borrower_input"],
+                turn["agent_response"]
+            )
+            scores["call_id"] = turn["call_id"]
+            scores["state"] = turn["state"]
+            scores["latency_ms"] = turn["latency_ms"]
+            results.append(scores)
+            time.sleep(2)
+        except Exception as e:
+            print(f"Skipping turn: {e}")
+            continue
+
     return {"evals": results}
 
 @app.get("/changelog")
