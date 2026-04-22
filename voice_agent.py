@@ -5,52 +5,91 @@ from state_machine import DebtFlowSM
 from agent import get_agent_response
 from tts import text_to_speech
 from logger import log_turn
-from stt import listen_and_transcribe
+from stt import connect_deepgram, start_listening
 import time
 
 sm = DebtFlowSM()
 call_id = "live_call_1"
 current_playback = None
-agent_speaking = False
-last_agent_finished = 0
-SILENCE_AFTER_SPEECH = 3  # ignore transcripts for 3s after agent finishes
+agent_speaking = False   # True while mpg123 is playing
+processing = False       # True while LLM is generating
 
-async def handle_transcript(transcript: str):
-    global current_playback, agent_speaking, last_agent_finished
+GREETING_TEXT = "Hello, this is Priya calling from the bank's loan recovery team. Am I speaking with the account holder? Is this a good time to talk?"
 
-    # block transcripts while agent is speaking or just finished
-    if agent_speaking:
-        return
-    if time.time() - last_agent_finished < SILENCE_AFTER_SPEECH:
-        return
-    # ignore very short transcripts — likely noise
-    if len(transcript.split()) < 2:
-        return
+def is_muted():
+    """Deepgram should not receive audio while agent is speaking or LLM is running."""
+    return agent_speaking or processing
 
-    print(f"\nYou: {transcript}")
-
-    start = time.time()
-    sm.transition(transcript)
-    response = get_agent_response(sm.current_state, transcript)
-    latency_ms = (time.time() - start) * 1000
-
-    print(f"Priya ({sm.current_state.value}): {response}")
-    print(f"Latency: {round(latency_ms)}ms\n")
-
-    log_turn(call_id, sm.current_state.value, transcript, response, latency_ms)
-    text_to_speech(response, "response.mp3")
-
+async def speak(text: str, state: str):
+    global current_playback, agent_speaking
+    print(f"Priya ({state}): {text}\n")
+    # run blocking ElevenLabs API call in a thread so event loop stays free
+    await asyncio.to_thread(text_to_speech, text, "response.mp3")
     agent_speaking = True
     current_playback = subprocess.Popen(
         ["mpg123", "-q", "response.mp3"],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
+        stderr=subprocess.DEVNULL,
     )
-    # wait for playback to finish in background
     await asyncio.get_event_loop().run_in_executor(None, current_playback.wait)
     agent_speaking = False
-    last_agent_finished = time.time()
+
+async def handle_transcript(transcript: str):
+    global processing
+
+    if processing:
+        return
+    if len(transcript.split()) < 2:
+        return
+
+    processing = True
+    try:
+        print(f"\nYou: {transcript}")
+        start = time.time()
+        sm.transition(transcript)
+        # run blocking Groq API call in a thread so event loop stays free
+        response = await asyncio.to_thread(get_agent_response, sm.current_state, transcript)
+        latency_ms = (time.time() - start) * 1000
+        print(f"Latency: {round(latency_ms)}ms")
+        log_turn(call_id, sm.current_state.value, transcript, response, latency_ms)
+        await speak(response, sm.current_state.value)
+    finally:
+        processing = False
+
+async def main():
+    from state_machine import State
+
+    # connect Deepgram and init mic first — this flushes all ALSA/JACK errors
+    # before any meaningful output appears on screen
+    greeting_done = False
+
+    def _is_muted():
+        # mute until greeting finishes, then use normal mute logic
+        return (not greeting_done) or is_muted()
+
+    connection = await connect_deepgram(handle_transcript)
+    # start_listening suppresses ALSA errors internally during mic init
+    listen_task = asyncio.create_task(
+        start_listening(connection, is_muted_fn=_is_muted)
+    )
+    # small yield so start_listening runs up to "Listening... speak now."
+    await asyncio.sleep(0.3)
+
+    # now play greeting — terminal is clean at this point
+    print(f"\nPriya (greeting): {GREETING_TEXT}\n")
+    await asyncio.to_thread(text_to_speech, GREETING_TEXT, "response.mp3")
+    p = subprocess.Popen(
+        ["mpg123", "-q", "response.mp3"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    await asyncio.get_event_loop().run_in_executor(None, p.wait)
+
+    sm.current_state = State.ASSESS
+    greeting_done = True  # unmute — mic now live
+
+    await listen_task
 
 if __name__ == "__main__":
     print("DebtFlow Voice Agent starting...")
-    asyncio.run(listen_and_transcribe(handle_transcript))
+    asyncio.run(main())

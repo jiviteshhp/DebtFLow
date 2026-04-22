@@ -1,7 +1,8 @@
 venv/
-*.mp3
-*.jsonl
-.env
 __pycache__/
-node_modules/
-dashboard/node_modules/
+*.pyc
+response.mp3
+conversations.jsonl
+changelog.jsonl
+debug.log
+.env

@@ -1,0 +1,51 @@
+{
+  "assess": {
+    "count": 32,
+    "empathy": 2.91,
+    "goal_progress": 4.53,
+    "state_validity": 5.72,
+    "overall": 4.39
+  },
+  "cant_pay": {
+    "count": 6,
+    "empathy": 6.5,
+    "goal_progress": 3.83,
+    "state_validity": 7.5,
+    "overall": 5.94
+  },
+  "confirm": {
+    "count": 1,
+    "empathy": 2,
+    "goal_progress": 8,
+    "state_validity": 8,
+    "overall": 6.0
+  },
+  "will_pay": {
+    "count": 4,
+    "empathy": 0.25,
+    "goal_progress": 3.5,
+    "state_validity": 3.25,
+    "overall": 2.33
+  },
+  "end": {
+    "count": 2,
+    "empathy": 1,
+    "goal_progress": 7,
+    "state_validity": 7.5,
+    "overall": 5.17
+  },
+  "wont_pay": {
+    "count": 2,
+    "empathy": 1,
+    "goal_progress": 2,
+    "state_validity": 6.5,
+    "overall": 3.17
+  },
+  "objection": {
+    "count": 3,
+    "empathy": 1.67,
+    "goal_progress": 3.33,
+    "state_validity": 2.67,
+    "overall": 2.55
+  }
+}
