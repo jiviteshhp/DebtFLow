@@ -1,14 +1,12 @@
 # DebtFlow — AI Voice Debt Collection Agent
 
-A voice agent that conducts empathetic debt recovery conversations in real time. Built to understand Riverline's stack and engineering philosophy.
+A real-time voice agent that conducts empathetic debt recovery conversations. Built as a deep dive into production voice agent engineering — STT, LLM, TTS, VAD, state management, and numerical eval infrastructure.
 
-**Stack:** Python · Deepgram Nova-2 STT · Groq Llama 3.1 8B · ElevenLabs TTS · Silero VAD · FastAPI · React
+**Stack:** Python · Deepgram Nova-2 · Groq Llama 3.1 8B · ElevenLabs TTS · Silero VAD · FastAPI · React
 
 ---
 
-## What It Does
-
-Priya — an AI loan recovery agent — calls borrowers, understands their situation, and negotiates a payment plan. The conversation is fully voice-driven: speak naturally, get a response in under 800ms.
+## Demo
 
 ```
 Priya:  "Hello, this is Priya from the bank's loan recovery team. Is this a good time?"
@@ -24,33 +22,31 @@ Priya:  "Got it. I'll send you a confirmation shortly. Thank you for working wit
 
 ## Architecture
 
-### Why a State Machine Over an Agentic Loop
+### Why a State Machine
 
-Debt collection conversations follow predictable patterns — greeting, assess, negotiate, close. A deterministic state machine makes every transition explicit, auditable, and traceable. An agentic loop would introduce unpredictability at exactly the moments where consistency matters most (promising a payment date, closing a commitment).
-
-This matches Riverline's philosophy: single agents with clear state over multi-agent swarms unless justified.
+Debt collection conversations follow predictable patterns — greet, assess, negotiate, close. A deterministic state machine makes every transition explicit, auditable, and traceable. An agentic loop introduces unpredictability at exactly the moments where consistency matters most: confirming a payment date, closing a commitment.
 
 ```
 GREETING → ASSESS → CANT_PAY → NEGOTIATE → WILL_PAY → END
                   → WONT_PAY → OBJECTION → WILL_PAY → END
 ```
 
-Each state has its own system prompt. The LLM never sees the full conversation logic — it only knows what to do in its current state. Conversation history (last 5 turns) is passed as context so Priya remembers what was said without re-asking.
+Each state has its own system prompt. The LLM only knows what to do in its current state — it never sees the full conversation logic. Conversation history (last 5 turns) is passed as context so Priya remembers what was said without re-asking.
 
 ### Voice Pipeline
 
 ```
-Mic → PyAudio (device auto-detection) → Deepgram Nova-2 (STT, en-IN, endpointing=500ms)
-    → Groq Llama 3.1 8B (LLM, <500ms TTFT)
+Mic → PyAudio → Deepgram Nova-2 (STT, en-IN, endpointing=500ms)
+    → Groq Llama 3.1 8B (LLM)
     → ElevenLabs Anika (TTS, Indian female voice)
     → mpg123 playback
 ```
 
-**Key decisions:**
-- Deepgram `interim_results=True` with `endpointing=500ms` — fast turn detection without cutting off mid-sentence
-- Mic muted to Deepgram during TTS playback via `is_muted_fn` — prevents echo and stale transcripts
-- Groq and ElevenLabs calls wrapped in `asyncio.to_thread` — blocking API calls never freeze the event loop
-- `classify_intent` has a 5s hard timeout — prevents hangs from rate limiting
+**Key engineering decisions:**
+- `interim_results=True` with `endpointing=500ms` — fast turn detection without cutting off mid-sentence pauses
+- Mic muted to Deepgram during TTS playback — prevents echo and stale transcripts queuing up
+- Groq and ElevenLabs calls in `asyncio.to_thread` — blocking API calls never freeze the event loop
+- `classify_intent` has a 5s hard timeout — prevents conversation hangs under rate limiting
 
 ---
 
@@ -60,7 +56,7 @@ The most important part of this project is not the voice agent — it's the meas
 
 ### LLM-as-Judge
 
-Every conversation turn is scored on three dimensions by a separate Groq call:
+Every conversation turn is scored on three dimensions by a separate model:
 
 | Metric | What It Measures |
 |--------|-----------------|
@@ -83,6 +79,8 @@ Scored across 50 simulated conversations:
 
 ### Latency Percentiles
 
+Production engineers think in percentiles, not means. A p50 of 555ms looks fine. A p99 of 8772ms means 1 in 100 turns feels completely broken.
+
 | State | p50 | p90 | p99 |
 |-------|-----|-----|-----|
 | assess | 555ms | 1684ms | 8772ms |
@@ -101,7 +99,7 @@ Baseline scores are frozen in `baseline_scores.json`. Every eval run compares ag
   REGRESSION: WONT_PAY state_validity dropped 2.5 points (6.5 → 4.0)
 ```
 
-This makes prompt changes safe to ship — you know immediately if something regressed.
+Prompt changes are now safe to ship — regressions surface immediately instead of silently degrading production quality.
 
 ---
 
@@ -118,14 +116,15 @@ One prompt change. Measured, logged, documented. See `learnings.md`.
 
 ---
 
-## Prompt Changelog
+## Prompt Learnings
 
-Every prompt change is logged in `learnings.md` with before/after scores and a learning. Inspired by Riverline's Shaastris system — knowledge that compounds instead of getting lost.
+Every prompt change is logged in `learnings.md` with before/after scores and a one-line learning. Knowledge compounds instead of getting lost.
 
-```markdown
+```
 ## 2026-04-23 — WILL_PAY warmth fix
 Before: empathy=0.25, overall=2.33 | After: empathy=4.5, overall=7.5
 Learning: Agent coldest when borrower agreed to pay. One warm sentence = 18x empathy gain.
+Regression: END goal_progress -3.7, WONT_PAY validity -2.5. Action: rebalance closing prompt.
 ```
 
 ---
@@ -133,26 +132,23 @@ Learning: Agent coldest when borrower agreed to pay. One warm sentence = 18x emp
 ## Running It
 
 ```bash
-# Install
 pip install -r requirements.txt
-
-# Set environment variables
 cp .env.example .env
-# Add GROQ_API_KEY, DEEPGRAM_API_KEY, ELEVENLABS_API_KEY
+# fill in GROQ_API_KEY, DEEPGRAM_API_KEY, ELEVENLABS_API_KEY
 
-# Run voice agent
+# voice agent
 python3 voice_agent.py
 
-# Generate simulated conversations
+# generate test conversations
 python3 simulate.py
 
-# Run evals (first time — saves baseline)
+# run evals — first time saves baseline
 python3 evals.py baseline
 
-# Run evals (after prompt changes — detects regressions)
+# run evals — detects regressions vs baseline
 python3 evals.py
 
-# Start API + dashboard
+# API + dashboard
 uvicorn main:app --reload
 cd dashboard && npm start
 ```
@@ -161,11 +157,11 @@ cd dashboard && npm start
 
 ## What I'd Build Next
 
-- **Pipecat integration** — replace PyAudio with WebRTC for echo cancellation and SmartTurn for semantic turn detection. Current endpointing is silence-based; SmartTurn understands "I think... um... maybe next week" as incomplete.
-- **Whisper fine-tuning** — fine-tune on Indian English debt collection vocabulary. "DPD", "EMI", "PTP" are consistently mistranscribed.
-- **promptfoo red-teaming** — adversarial eval suite: borrowers who switch languages mid-call, claim fraud, go silent, or give contradictory answers.
-- **SLM distillation** — use LLM-as-judge outputs as training data to distill a smaller, faster classifier. Reduce the classify_intent Groq call to a local model.
-- **Cost tracking** — token counts and rupee cost per conversation are already logged. Build the cost-vs-quality scatter plot to find the optimal model size.
+- **Pipecat + WebRTC** — replace PyAudio with WebRTC for echo cancellation and SmartTurn for semantic turn detection. Current endpointing is silence-based; SmartTurn understands incomplete sentences.
+- **promptfoo red-teaming** — adversarial evals: borrowers who claim fraud, switch context mid-call, or go silent.
+- **SLM distillation** — use LLM-as-judge outputs as training data to distill a smaller local classifier, eliminating the `classify_intent` API call entirely.
+- **Whisper fine-tuning** — fine-tune on Indian English debt collection vocabulary. "DPD", "EMI", "PTP" are mistranscribed on standard models.
+- **Cost tracking** — token counts are logged per turn. Build cost-vs-quality scatter plot to find optimal model size.
 
 ---
 
@@ -173,18 +169,18 @@ cd dashboard && npm start
 
 ```
 DebtFlow/
-├── voice_agent.py     # main loop — STT → state machine → LLM → TTS
-├── state_machine.py   # 8-state FSM + classify_intent
-├── agent.py           # per-state Groq prompts + conversation history
-├── stt.py             # Deepgram live transcription with mute control
-├── tts.py             # ElevenLabs TTS
-├── vad.py             # Silero VAD for barge-in detection
-├── evals.py           # LLM-as-judge + per-state scores + regression detection
-├── simulate.py        # generates 30 test conversations via API
-├── main.py            # FastAPI backend
-├── logger.py          # conversation logging to JSONL
-├── changelog.py       # prompt change tracking
-├── learnings.md       # accumulated prompt insights
-├── baseline_scores.json  # frozen eval baseline for regression detection
-└── dashboard/         # React eval dashboard
+├── voice_agent.py        # main loop — STT → state machine → LLM → TTS
+├── state_machine.py      # 8-state FSM + classify_intent
+├── agent.py              # per-state prompts + conversation history
+├── stt.py                # Deepgram live transcription with mute control
+├── tts.py                # ElevenLabs TTS
+├── vad.py                # Silero VAD
+├── evals.py              # LLM-as-judge + per-state scores + regression detection
+├── simulate.py           # 30 test conversations via API
+├── main.py               # FastAPI backend
+├── logger.py             # JSONL conversation logging
+├── changelog.py          # prompt change tracking
+├── learnings.md          # accumulated prompt insights
+├── baseline_scores.json  # frozen eval baseline
+└── dashboard/            # React eval dashboard
 ```
