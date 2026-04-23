@@ -58,8 +58,6 @@ thank them genuinely.
 Then confirm the exact amount and date they stated. 
 Keep it human — you're wrapping up a difficult conversation well.""",
 
-    State.CONFIRM: """The borrower confirmed the plan.
-Close warmly in one sentence. Tell them you'll send a confirmation.""",
 
     State.END: """Close the call.
 If committed: "Great, I'll send you a confirmation. Thank you for working with us."
